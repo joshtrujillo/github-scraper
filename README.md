@@ -26,4 +26,4 @@ You can configure which organization to scrape by changing the `ORGANIZATION` co
 
 ## License
 
-MIT
+GPL
