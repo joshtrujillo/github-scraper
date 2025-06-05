@@ -14,11 +14,14 @@ class GitHubClient
 
   # Initialize a new GitHub client
   # @param access_token [String, nil] GitHub API token (uses ENV if nil)
+  # @param cache_ttl [Integer] Time in seconds to cache API responses (default: 3600)
   # @return [void]
-  def initialize(access_token = nil)
+  def initialize(access_token = nil, cache_ttl = 3600)
     @access_token = access_token || ENV['GITHUB_ACCESS_TOKEN']
     @logger = Logger.new($stdout)
     @logger.level = Logger::INFO
+    @cache = {}
+    @cache_ttl = cache_ttl
 
     if @access_token.nil? || @access_token.empty?
       @logger.warn 'No GitHub access token provided. Using unauthenticated client with severe rate limits.'
@@ -34,22 +37,36 @@ class GitHubClient
 
   # Fetch all public repositories for an organization
   # @param org_name [String] Organization name
+  # @param since [Time, nil] Only return repos updated at or after this time
   # @return [Array<Sawyer::Resource>] List of repository resources
-  def fetch_organization_repos(org_name)
+  def fetch_organization_repos(org_name, since = nil)
+    cache_key = "repos:#{org_name}"
+    cached_data = check_cache(cache_key)
+    return cached_data if cached_data && (!since || since < Time.now - @cache_ttl)
+    
     with_error_handling do
-      @logger.info "Fetching repositories for #{org_name}..."
-      @client.organization_repositories(org_name, type: 'public')
+      @logger.info "Fetching repositories for #{org_name}#{since ? " since #{since}" : ''}..."
+      result = @client.organization_repositories(org_name, type: 'public')
+      
+      # Filter by updated time if specified
+      result = result.select { |repo| repo.updated_at >= since } if since
+      
+      cache_result(cache_key, result)
+      result
     end
   end
 
   # Fetch all pull requests for a repository (default: all pull requests, both open and closed)
   # @param repo_full_name [String] Full repository name in format 'owner/repo'
   # @param state [String] Pull request state ('open', 'closed', or 'all')
+  # @param since [Time, nil] Only return PRs updated at or after this time
   # @return [Array<Sawyer::Resource>] List of pull request resources
-  def fetch_pull_requests(repo_full_name, state = 'all')
+  def fetch_pull_requests(repo_full_name, state = 'all', since = nil)
     with_error_handling do
-      @logger.info "Fetching #{state} pull requests for #{repo_full_name}..."
-      @client.pull_requests(repo_full_name, state: state)
+      @logger.info "Fetching #{state} pull requests for #{repo_full_name}#{since ? " since #{since}" : ''}..."
+      options = { state: state }
+      options[:since] = since.iso8601 if since
+      @client.pull_requests(repo_full_name, options)
     end
   end
 
@@ -58,9 +75,15 @@ class GitHubClient
   # @param pull_number [Integer] Pull request number
   # @return [Sawyer::Resource] Pull request details
   def fetch_pull_request_details(repo_full_name, pull_number)
+    cache_key = "pr:#{repo_full_name}:#{pull_number}"
+    cached_data = check_cache(cache_key)
+    return cached_data if cached_data
+    
     with_error_handling do
       @logger.info "Fetching details for PR ##{pull_number} in #{repo_full_name}..."
-      @client.pull_request(repo_full_name, pull_number)
+      result = @client.pull_request(repo_full_name, pull_number)
+      cache_result(cache_key, result)
+      result
     end
   end
 
@@ -69,9 +92,15 @@ class GitHubClient
   # @param pull_number [Integer] Pull request number
   # @return [Array<Sawyer::Resource>] List of review resources
   def fetch_pull_request_reviews(repo_full_name, pull_number)
+    cache_key = "reviews:#{repo_full_name}:#{pull_number}"
+    cached_data = check_cache(cache_key)
+    return cached_data if cached_data
+    
     with_error_handling do
       @logger.info "Fetching reviews for PR ##{pull_number} in #{repo_full_name}..."
-      @client.pull_request_reviews(repo_full_name, pull_number)
+      result = @client.pull_request_reviews(repo_full_name, pull_number)
+      cache_result(cache_key, result)
+      result
     end
   end
 
@@ -79,9 +108,15 @@ class GitHubClient
   # @param username [String] GitHub username
   # @return [Sawyer::Resource, nil] User details or nil if not found
   def fetch_user(username)
+    cache_key = "user:#{username}"
+    cached_data = check_cache(cache_key)
+    return cached_data if cached_data
+    
     with_error_handling do
       @logger.info "Fetching user data for #{username}..."
-      @client.user(username)
+      result = @client.user(username)
+      cache_result(cache_key, result)
+      result
     end
   end
 
@@ -92,6 +127,32 @@ class GitHubClient
   end
 
   private
+  
+  # Check if a cached result exists and is still valid
+  # @param key [String] Cache key
+  # @return [Object, nil] Cached data or nil if not found or expired
+  def check_cache(key)
+    return nil unless @cache.key?(key)
+    cache_entry = @cache[key]
+    
+    if Time.now - cache_entry[:timestamp] < @cache_ttl
+      @logger.debug "Cache hit for #{key}"
+      return cache_entry[:data]
+    end
+    
+    # Expired entry
+    @cache.delete(key)
+    nil
+  end
+  
+  # Store result in cache
+  # @param key [String] Cache key
+  # @param data [Object] Data to cache
+  # @return [Object] The cached data
+  def cache_result(key, data)
+    @cache[key] = { data: data, timestamp: Time.now }
+    data
+  end
 
   # Wrapper method for API calls with standardized error handling
   # @yield The API call to execute
