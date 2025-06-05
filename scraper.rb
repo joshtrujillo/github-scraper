@@ -7,6 +7,7 @@
 # Uses ActiveRecord to model the sqlite database scheme.
 
 require 'dotenv/load'
+require 'parallel'
 require_relative 'config/database'
 require_relative 'lib/github_client'
 require_relative 'models/repository'
@@ -20,18 +21,28 @@ class GitHubScraper
   attr_reader :client, :logger
 
   ORGANIZATION = 'vercel'
+  THREADS = 5 # Number of threads to use for parallel operations
 
   # Creates GitHub client and logger instance variables.
   # Runs Database migrations
   # @return [void]
-  def initialize
-    # Set up GitHub client
-    @client = GitHubClient.new
+  def initialize(verbose: false, thread: false)
+    # Enable multithreading (false by default)
+    @thread = thread
+    @verbose = verbose
+
+    # Set up GitHub client and pass thread flag to control mutex usage
+    @client = GitHubClient.new(nil, 3600, thread: @thread)
     @logger = @client.logger
+
+    # Set debug flag on client for thread-specific logging
+    @client.debug = @verbose
+
+    # Set logger to DEBUG level if verbose
+    @logger.level = Logger::DEBUG if @verbose
 
     # Run database migrations
     migrate_database
-
     @logger.info ActiveSupport::LogSubscriber.new.send(
       :color,
       "GitHub Scraper initialized for organization: #{ORGANIZATION}",
@@ -43,21 +54,24 @@ class GitHubScraper
   # the API requests.
   # @param incremental [Boolean] Whether to perform an incremental sync (default: true)
   # @return [void]
-  def run(incremental = true)
+  def run(incremental: true)
     @logger.info ActiveSupport::LogSubscriber.new.send(
       :color,
       "Starting GitHub scraper (#{incremental ? 'incremental' : 'full'} sync)...",
       :green
     )
-
     # Fetch and store repositories
     repositories = fetch_repositories(incremental)
-
-    # For each repository, fetch and store pull requests
-    repositories.each do |repo|
-      fetch_pull_requests(repo)
+    # For each repository, fetch and store pull requests in parallel
+    if @thread
+      Parallel.each(repositories, in_threads: THREADS) do |repo|
+        fetch_pull_requests(repo)
+      end
+    else
+      repositories.each do |repo|
+        fetch_pull_requests(repo)
+      end
     end
-
     @logger.info ActiveSupport::LogSubscriber.new.send(
       :color,
       'GitHub scraper completed successfully!',
@@ -120,50 +134,73 @@ class GitHubScraper
     @logger.info "Fetching pull requests for #{repo.name}..."
     # Get the full repository name
     repo_full_name = "#{ORGANIZATION}/#{repo.name}"
-
     # Only fetch PRs updated since last sync if we've synced before
     since_time = repo.last_synced_at
     @logger.info "Using incremental sync for #{repo.name} (last synced: #{since_time})" if since_time
-
     # Fetch pull requests (both open and closed), filtered by updated time if available
     github_prs = @client.fetch_pull_requests(repo_full_name, 'all', since_time)
     @logger.info "Found #{github_prs.size} pull requests for #{repo.name}"
-    github_prs.each do |github_pr|
-      # Get detailed information for this PR
-      pr_details = @client.fetch_pull_request_details(repo_full_name, github_pr.number)
-      # Find or create the pull request in the database
-      pr = PullRequest.find_or_initialize_by(github_id: github_pr.id)
 
-      # Skip if PR hasn't changed since last sync (compare database updated_at with GitHub updated_at)
-      if !pr.new_record? && pr.last_synced_at && pr.pr_updated_at >= github_pr.updated_at
-        @logger.info "Skipping unchanged PR ##{pr.number}: #{pr.title}"
-        next
+    if @thread
+      # Process PRs in parallel
+      Parallel.each(github_prs, in_threads: THREADS) do |github_pr|
+        # Get detailed information for this PR
+        pr_details = @client.fetch_pull_request_details(repo_full_name, github_pr.number)
+
+        # Critical Section
+        ActiveRecord::Base.connection_pool.with_connection do
+          process_pr(github_pr, pr_details, repo_full_name, repo)
+        end
       end
-
-      # Update pull request attributes
-      pr.update(
-        repository_id: repo.id,
-        number: github_pr.number,
-        title: github_pr.title,
-        pr_updated_at: github_pr.updated_at,
-        closed_at: github_pr.closed_at,
-        merged_at: github_pr.merged_at,
-        author_login: github_pr.user.login,
-        additions: pr_details.additions,
-        deletions: pr_details.deletions,
-        changed_files: pr_details.changed_files,
-        commits_count: pr_details.commits,
-        last_synced_at: Time.now
-      )
-      @logger.info "Saved PR ##{pr.number}: #{pr.title}"
-      # Store the PR author in the users table
-      store_user(github_pr.user)
-      # Fetch and store reviews for this PR
-      fetch_reviews(repo_full_name, pr)
+    else
+      # Process PRs sequentially
+      github_prs.each do |github_pr|
+        # Get detailed information for this PR
+        pr_details = @client.fetch_pull_request_details(repo_full_name, github_pr.number)
+        process_pr(github_pr, pr_details, repo_full_name, repo)
+      end
     end
 
     # Update repository sync timestamp
     repo.update(last_synced_at: Time.now)
+  end
+
+  def process_pr(github_pr, pr_details, repo_full_name, repo)
+    # Find or create the pull request in the database
+    pr = PullRequest.find_or_initialize_by(github_id: github_pr.id)
+
+    # Skip if PR hasn't changed since last sync (compare database updated_at with GitHub updated_at)
+    if !pr.new_record? && pr.last_synced_at && pr.pr_updated_at >= github_pr.updated_at
+      @logger.info "Skipping unchanged PR ##{pr.number}: #{pr.title}"
+      return
+    end
+
+    # Skip if PR details couldn't be fetched
+    if pr_details.nil?
+      @logger.warn "Could not fetch details for PR ##{github_pr.number} in #{repo_full_name}. Skipping."
+      return
+    end
+
+    # Update pull request attributes
+    pr.update(
+      repository_id: repo.id,
+      number: github_pr.number,
+      title: github_pr.title,
+      pr_updated_at: github_pr.updated_at,
+      closed_at: github_pr.closed_at,
+      merged_at: github_pr.merged_at,
+      author_login: github_pr.user.login,
+      additions: pr_details.additions,
+      deletions: pr_details.deletions,
+      changed_files: pr_details.changed_files,
+      commits_count: pr_details.commits,
+      last_synced_at: Time.now
+    )
+    @logger.info "Saved PR ##{pr.number}: #{pr.title}"
+    # Store the PR author in the users table
+    store_user(github_pr.user)
+    # Fetch and store reviews for this PR
+    fetch_reviews(repo_full_name, pr)
   end
 
   # Fetches all reviews for a PR
@@ -173,16 +210,45 @@ class GitHubScraper
   # @param pr [PullRequest] The PR whose reviews to fetch
   # @return [void]
   def fetch_reviews(repo_full_name, pr)
-    # Fetch all reviews for this PR
+    # API request - fetch all reviews for this PR
     github_reviews = @client.fetch_pull_request_reviews(repo_full_name, pr.number)
     @logger.info "Found #{github_reviews.size} reviews for PR ##{pr.number}."
-    github_reviews.each do |github_review|
+
+    # Use parallel processing if:
+    # 1. Threads are enabled globally via @thread flag AND
+    # 2. Either we have enough reviews to make it worthwhile OR verbose logging is enabled
+    if @thread && (github_reviews.size > 3 || @verbose)
+      @logger.debug "Processing #{github_reviews.size} reviews in parallel for PR ##{pr.number}"
+
+      # Process reviews in parallel - this creates a thread pool and distributes work
+      # [THREADS, github_reviews.size].min ensures we don't create more threads than needed
+      Parallel.each(github_reviews, in_threads: [THREADS, github_reviews.size].min) do |github_review|
+        # Each review is processed in its own thread
+        process_review(github_review, pr)
+      end
+    else
+      # For small numbers of reviews or when threading is disabled, process sequentially
+      github_reviews.each do |github_review|
+        process_review(github_review, pr)
+      end
+    end
+  end
+
+  # Extracted method to process a single review
+  # This allows the same code to be used by both parallel and sequential workflows
+  # @param github_review [Sawyer::Resource] The GitHub review to process
+  # @param pr [PullRequest] The PR this review belongs to
+  # @return [void]
+  def process_review(github_review, pr)
+    # Critical section
+    ActiveRecord::Base.connection_pool.with_connection do
       # Find or create the review in the database
       review = Review.find_or_initialize_by(github_id: github_review.id)
+
       # Check if user is nil before accessing login
       if github_review.user.nil?
         @logger.warn "Review #{github_review.id} has no user data. Skipping..."
-        next
+        return
       end
 
       # Update review attributes
@@ -192,7 +258,15 @@ class GitHubScraper
         state: github_review.state,
         submitted_at: github_review.submitted_at
       )
-      @logger.info "Saved review by #{review.author_login} on PR ##{pr.number}"
+
+      # Log with thread info in verbose mode for better visibility of parallel operations
+      thread_id = Thread.current.object_id.to_s(16)
+      if @verbose
+        @logger.debug "Thread-#{thread_id} saved review by #{review.author_login} on PR ##{pr.number}"
+      else
+        @logger.info "Saved review by #{review.author_login} on PR ##{pr.number}"
+      end
+
       # Store the review author in the users table
       store_user(github_review.user)
     end
@@ -246,13 +320,21 @@ end
 if __FILE__ == $PROGRAM_NAME
   require 'optparse'
 
-  options = { incremental: true }
+  options = { incremental: true, verbose: false, thread: false }
 
   parser = OptionParser.new do |opts|
     opts.banner = 'Usage: ruby scraper.rb [options]'
 
     opts.on('-f', '--full', 'Perform a full sync instead of incremental') do
       options[:incremental] = false
+    end
+
+    opts.on('-v', '--verbose', 'Enable verbose logging with thread information') do
+      options[:verbose] = true
+    end
+
+    opts.on('-t', '--thread', 'Enables multithreading') do
+      options[:thread] = true
     end
 
     opts.on('-h', '--help', 'Display this help message') do
@@ -263,6 +345,6 @@ if __FILE__ == $PROGRAM_NAME
 
   parser.parse!
 
-  scraper = GitHubScraper.new
-  scraper.run(options[:incremental])
+  scraper = GitHubScraper.new(verbose: options[:verbose], thread: options[:thread])
+  scraper.run(incremental: options[:incremental])
 end
