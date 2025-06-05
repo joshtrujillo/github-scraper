@@ -19,7 +19,7 @@
         pkgs = nixpkgs.legacyPackages.${system};
 
         # Ruby with common gems
-        rubyEnv = pkgs.ruby_3_2.withPackages (
+        rubyEnv = pkgs.ruby_3_3.withPackages (
           ps: with ps; [
             # gems
             activerecord
@@ -27,6 +27,7 @@
             octokit
             dotenv
             faraday
+            json
           ]
         );
       in
@@ -36,6 +37,7 @@
             bundler
             rubyEnv
             sqlite
+            solargraph
           ];
 
           shellHook = ''
