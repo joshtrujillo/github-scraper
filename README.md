@@ -52,6 +52,14 @@ subsequent runs, it only fetches data that has been updated since the last sync.
 To perform a full sync that ignores previous sync timestamps, use the `--full`
 flag.
 
+## Multithreading
+
+The scraper can utilize many threads for API calls and database operations.
+While multithreading provides a large speed boost, it is not helpful for the
+initial scrape, where the scraper encounters the rate limit regardless of
+threading mode (on my machine). This speedup is practical for incremental
+scraping, where there is a noticeable increase in speed.
+
 ## License
 
 GPL
