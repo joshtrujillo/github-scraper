@@ -41,15 +41,18 @@ class GitHubScraper
 
   # Main method to execute client method calls. The client ends up making
   # the API requests.
+  # @param incremental [Boolean] Whether to perform an incremental sync (default: true)
   # @return [void]
-  def run
+  def run(incremental = true)
     @logger.info ActiveSupport::LogSubscriber.new.send(
       :color,
-      'Starting GitHub scraper...',
+      "Starting GitHub scraper (#{incremental ? 'incremental' : 'full'} sync)...",
       :green
     )
+
     # Fetch and store repositories
-    repositories = fetch_repositories
+    repositories = fetch_repositories(incremental)
+
     # For each repository, fetch and store pull requests
     repositories.each do |repo|
       fetch_pull_requests(repo)
@@ -67,30 +70,49 @@ class GitHubScraper
 
   # Uses Repository objects to find or insert each
   # repo into the database. Updates the database row if needed.
+  # If incremental is true, only fetches repos updated since last sync.
   #
+  # @param incremental [Boolean] Whether to perform an incremental sync
   # @return [Array<Repository>] list of repositories
-  def fetch_repositories
+  def fetch_repositories(incremental = true)
     @logger.info "Fetching repositories for #{ORGANIZATION}..."
-    github_repos = @client.fetch_organization_repos(ORGANIZATION)
+
+    # Get the oldest last_synced_at time from repositories
+    last_sync_time = incremental ? Repository.minimum(:last_synced_at) : nil
+
+    @logger.info "Using incremental sync (last synced: #{last_sync_time})" if incremental && last_sync_time
+
+    # Fetch repositories, filtered by update time if available
+    github_repos = @client.fetch_organization_repos(ORGANIZATION, last_sync_time)
     @logger.info "Found #{github_repos.size} repositories for #{ORGANIZATION}."
+
     github_repos.map do |github_repo|
       # Find or create the repository in the database
       repo = Repository.find_or_initialize_by(github_id: github_repo.id)
+
+      # Skip update if repo hasn't changed since last sync
+      if !repo.new_record? && repo.last_synced_at && github_repo.updated_at <= repo.last_synced_at
+        @logger.info "Skipping unchanged repository: #{repo.name}"
+        next repo
+      end
+
       # Update repository attributes
       repo.update(
         name: github_repo.name,
         url: github_repo.html_url,
         private: github_repo.private,
-        archived: github_repo.archived
+        archived: github_repo.archived,
+        last_synced_at: Time.now
       )
       @logger.info "Saved repository: #{repo.name}"
       repo
-    end
+    end.compact
   end
 
   # Fetches the pull requests for the given
   # repo with the client. Finds, inserts, updates in the database.
   # Each PR has its reviews and users fetched and stored as well.
+  # If repo has been synced before, only fetch PRs updated since last sync.
   #
   # @param repo [Repository] repository whose PRs to fetch
   # @return [void]
@@ -98,14 +120,26 @@ class GitHubScraper
     @logger.info "Fetching pull requests for #{repo.name}..."
     # Get the full repository name
     repo_full_name = "#{ORGANIZATION}/#{repo.name}"
-    # Fetch all pull requests (both open and closed)
-    github_prs = @client.fetch_pull_requests(repo_full_name)
+
+    # Only fetch PRs updated since last sync if we've synced before
+    since_time = repo.last_synced_at
+    @logger.info "Using incremental sync for #{repo.name} (last synced: #{since_time})" if since_time
+
+    # Fetch pull requests (both open and closed), filtered by updated time if available
+    github_prs = @client.fetch_pull_requests(repo_full_name, 'all', since_time)
     @logger.info "Found #{github_prs.size} pull requests for #{repo.name}"
     github_prs.each do |github_pr|
       # Get detailed information for this PR
       pr_details = @client.fetch_pull_request_details(repo_full_name, github_pr.number)
       # Find or create the pull request in the database
       pr = PullRequest.find_or_initialize_by(github_id: github_pr.id)
+
+      # Skip if PR hasn't changed since last sync (compare database updated_at with GitHub updated_at)
+      if !pr.new_record? && pr.last_synced_at && pr.pr_updated_at >= github_pr.updated_at
+        @logger.info "Skipping unchanged PR ##{pr.number}: #{pr.title}"
+        next
+      end
+
       # Update pull request attributes
       pr.update(
         repository_id: repo.id,
@@ -118,7 +152,8 @@ class GitHubScraper
         additions: pr_details.additions,
         deletions: pr_details.deletions,
         changed_files: pr_details.changed_files,
-        commits_count: pr_details.commits
+        commits_count: pr_details.commits,
+        last_synced_at: Time.now
       )
       @logger.info "Saved PR ##{pr.number}: #{pr.title}"
       # Store the PR author in the users table
@@ -126,6 +161,9 @@ class GitHubScraper
       # Fetch and store reviews for this PR
       fetch_reviews(repo_full_name, pr)
     end
+
+    # Update repository sync timestamp
+    repo.update(last_synced_at: Time.now)
   end
 
   # Fetches all reviews for a PR
@@ -206,6 +244,25 @@ class GitHubScraper
 end
 
 if __FILE__ == $PROGRAM_NAME
+  require 'optparse'
+
+  options = { incremental: true }
+
+  parser = OptionParser.new do |opts|
+    opts.banner = 'Usage: ruby scraper.rb [options]'
+
+    opts.on('-f', '--full', 'Perform a full sync instead of incremental') do
+      options[:incremental] = false
+    end
+
+    opts.on('-h', '--help', 'Display this help message') do
+      puts opts
+      exit
+    end
+  end
+
+  parser.parse!
+
   scraper = GitHubScraper.new
-  scraper.run
+  scraper.run(options[:incremental])
 end
