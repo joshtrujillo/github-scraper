@@ -24,7 +24,11 @@ class GitHubClient
     @cache_ttl = cache_ttl
 
     if @access_token.nil? || @access_token.empty?
-      @logger.warn 'No GitHub access token provided. Using unauthenticated client with severe rate limits.'
+      @logger.warn ActiveSupport::LogSubscriber.new.send(
+        :color,
+        'No GitHub access token provided. Using unauthenticated client with severe rate limits.',
+        :yellow
+      )
       @client = Octokit::Client.new
     else
       @client = Octokit::Client.new(access_token: @access_token)
@@ -43,14 +47,14 @@ class GitHubClient
     cache_key = "repos:#{org_name}"
     cached_data = check_cache(cache_key)
     return cached_data if cached_data && (!since || since < Time.now - @cache_ttl)
-    
+
     with_error_handling do
       @logger.info "Fetching repositories for #{org_name}#{since ? " since #{since}" : ''}..."
       result = @client.organization_repositories(org_name, type: 'public')
-      
+
       # Filter by updated time if specified
       result = result.select { |repo| repo.updated_at >= since } if since
-      
+
       cache_result(cache_key, result)
       result
     end
@@ -78,7 +82,7 @@ class GitHubClient
     cache_key = "pr:#{repo_full_name}:#{pull_number}"
     cached_data = check_cache(cache_key)
     return cached_data if cached_data
-    
+
     with_error_handling do
       @logger.info "Fetching details for PR ##{pull_number} in #{repo_full_name}..."
       result = @client.pull_request(repo_full_name, pull_number)
@@ -95,7 +99,7 @@ class GitHubClient
     cache_key = "reviews:#{repo_full_name}:#{pull_number}"
     cached_data = check_cache(cache_key)
     return cached_data if cached_data
-    
+
     with_error_handling do
       @logger.info "Fetching reviews for PR ##{pull_number} in #{repo_full_name}..."
       result = @client.pull_request_reviews(repo_full_name, pull_number)
@@ -111,7 +115,7 @@ class GitHubClient
     cache_key = "user:#{username}"
     cached_data = check_cache(cache_key)
     return cached_data if cached_data
-    
+
     with_error_handling do
       @logger.info "Fetching user data for #{username}..."
       result = @client.user(username)
@@ -127,24 +131,25 @@ class GitHubClient
   end
 
   private
-  
+
   # Check if a cached result exists and is still valid
   # @param key [String] Cache key
   # @return [Object, nil] Cached data or nil if not found or expired
   def check_cache(key)
     return nil unless @cache.key?(key)
+
     cache_entry = @cache[key]
-    
+
     if Time.now - cache_entry[:timestamp] < @cache_ttl
       @logger.debug "Cache hit for #{key}"
       return cache_entry[:data]
     end
-    
+
     # Expired entry
     @cache.delete(key)
     nil
   end
-  
+
   # Store result in cache
   # @param key [String] Cache key
   # @param data [Object] Data to cache
