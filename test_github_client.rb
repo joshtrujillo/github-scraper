@@ -1,8 +1,10 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# test_github_client.rb
+# Test file for the GitHubClient class
+# Demonstrates the functionality of the client by fetching data from GitHub
 # @author Josh Trujillo
+# @return [void] Prints test results to stdout
 
 require 'rubygems'
 require 'bundler/setup'

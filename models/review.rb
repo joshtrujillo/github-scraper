@@ -2,10 +2,11 @@
 # frozen_string_literal: true
 
 # models/review.rb
+# Review model representing a GitHub pull request review
 # @author Josh Trujillo
-
 class Review < ActiveRecord::Base
   # Relationships
+  # @return [PullRequest] The pull request this review belongs to
   belongs_to :pull_request
 
   # Validations

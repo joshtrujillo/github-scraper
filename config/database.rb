@@ -1,8 +1,10 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# config/database.rb
+# Database configuration file
+# Establishes the connection to the SQLite database
 # @author Josh Trujillo
+# @return [void] Establishes the ActiveRecord database connection
 
 require 'active_record'
 require 'dotenv/load'

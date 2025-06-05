@@ -2,14 +2,19 @@
 # frozen_string_literal: true
 
 # lib/github_client.rb
-# @author Josh Trujillo
-
 require 'octokit'
 require 'logger'
 
+# GitHub API client wrapper
+# @author Josh Trujillo
 class GitHubClient
+  # @return [Octokit::Client] The underlying Octokit client
+  # @return [Logger] Logger instance for this client
   attr_reader :client, :logger
 
+  # Initialize a new GitHub client
+  # @param access_token [String, nil] GitHub API token (uses ENV if nil)
+  # @return [void]
   def initialize(access_token = nil)
     @access_token = access_token || ENV['GITHUB_ACCESS_TOKEN']
     @logger = Logger.new($stdout)
@@ -28,6 +33,8 @@ class GitHubClient
   end
 
   # Fetch all public repositories for an organization
+  # @param org_name [String] Organization name
+  # @return [Array<Sawyer::Resource>] List of repository resources
   def fetch_organization_repos(org_name)
     with_error_handling do
       @logger.info "Fetching repositories for #{org_name}..."
@@ -36,6 +43,9 @@ class GitHubClient
   end
 
   # Fetch all pull requests for a repository (default: all pull requests, both open and closed)
+  # @param repo_full_name [String] Full repository name in format 'owner/repo'
+  # @param state [String] Pull request state ('open', 'closed', or 'all')
+  # @return [Array<Sawyer::Resource>] List of pull request resources
   def fetch_pull_requests(repo_full_name, state = 'all')
     with_error_handling do
       @logger.info "Fetching #{state} pull requests for #{repo_full_name}..."
@@ -44,6 +54,9 @@ class GitHubClient
   end
 
   # Fetch a specific pull request with detailed information
+  # @param repo_full_name [String] Full repository name in format 'owner/repo'
+  # @param pull_number [Integer] Pull request number
+  # @return [Sawyer::Resource] Pull request details
   def fetch_pull_request_details(repo_full_name, pull_number)
     with_error_handling do
       @logger.info "Fetching details for PR ##{pull_number} in #{repo_full_name}..."
@@ -52,6 +65,9 @@ class GitHubClient
   end
 
   # Fetch reviews for a specific pull request
+  # @param repo_full_name [String] Full repository name in format 'owner/repo'
+  # @param pull_number [Integer] Pull request number
+  # @return [Array<Sawyer::Resource>] List of review resources
   def fetch_pull_request_reviews(repo_full_name, pull_number)
     with_error_handling do
       @logger.info "Fetching reviews for PR ##{pull_number} in #{repo_full_name}..."
@@ -60,6 +76,8 @@ class GitHubClient
   end
 
   # Fetch a specific user
+  # @param username [String] GitHub username
+  # @return [Sawyer::Resource, nil] User details or nil if not found
   def fetch_user(username)
     with_error_handling do
       @logger.info "Fetching user data for #{username}..."
@@ -68,12 +86,16 @@ class GitHubClient
   end
 
   # Get current rate limit status
+  # @return [Sawyer::Resource] Rate limit information
   def rate_limit_status
     @client.rate_limit
   end
 
   private
 
+  # Wrapper method for API calls with standardized error handling
+  # @yield The API call to execute
+  # @return [Object, nil] The result of the API call or nil if error
   def with_error_handling
     retries = 0
     max_retries = 3
@@ -118,7 +140,8 @@ class GitHubClient
     end
   end
 
-  # Rate limit handling
+  # Rate limit handling - checks and waits if limits are near
+  # @return [void]
   def check_rate_limit
     # Check if near the rate limit before making a request
     rate_limit = @client.rate_limit
@@ -142,6 +165,8 @@ class GitHubClient
     end
   end
 
+  # Handles case when rate limit is exceeded
+  # @return [void]
   def handle_rate_limit_exceeded
     rate_limit = @client.rate_limit
     reset_time = Time.at(rate_limit.resets_at)

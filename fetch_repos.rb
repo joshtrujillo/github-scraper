@@ -1,7 +1,9 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
+# Simple script to fetch and display repositories from a GitHub organization
 # @author Josh Trujillo
+# @return [void] Prints repository information to stdout
 
 require 'octokit'
 require 'dotenv/load'

@@ -2,9 +2,11 @@
 # frozen_string_literal: true
 
 # db/migrate/002_create_pull_request.rb
+# Migration to create the pull_requests table
 # @author Josh Trujillo
-
 class CreatePullRequests < ActiveRecord::Migration[7.0]
+  # Creates the pull_requests table and indexes
+  # @return [void]
   def change
     create_table :pull_requests do |t|
       t.references :repository, null: false, foreign_key: true

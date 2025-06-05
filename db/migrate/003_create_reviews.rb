@@ -2,9 +2,11 @@
 # frozen_string_literal: true
 
 # db/migrate/003_create_reviews.rb
+# Migration to create the reviews table
 # @author Josh Trujillo
-
 class CreateReviews < ActiveRecord::Migration[7.0]
+  # Creates the reviews table and indexes
+  # @return [void]
   def change
     create_table :reviews do |t|
       t.references :pull_request, null: false, foreign_key: true

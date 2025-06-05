@@ -2,9 +2,11 @@
 # frozen_string_literal: true
 
 # db/migrate/004_create_users.rb
+# Migration to create the users table
 # @author Josh Trujillo
-
 class CreateUsers < ActiveRecord::Migration[7.0]
+  # Creates the users table and indexes
+  # @return [void]
   def change
     create_table :users do |t|
       t.string :login, null: false

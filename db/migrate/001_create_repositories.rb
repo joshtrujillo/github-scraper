@@ -2,8 +2,11 @@
 # frozen_string_literal: true
 
 # db/migrate/001_create_repositories.rb
-
+# Migration to create the repositories table
+# @author Josh Trujillo
 class CreateRepositories < ActiveRecord::Migration[7.0]
+  # Creates the repositories table and indexes
+  # @return [void]
   def change
     create_table :repositories do |t|
       t.string :name, null: false

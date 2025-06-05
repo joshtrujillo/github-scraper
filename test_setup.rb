@@ -1,8 +1,10 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# test_setup.rb
+# Test file for database setup and models
+# Creates test records in the database to verify functionality
 # @author Josh Trujillo
+# @return [void] Prints test results to stdout
 require_relative 'config/database'
 require_relative 'models/repository'
 require_relative 'models/pull_request'
