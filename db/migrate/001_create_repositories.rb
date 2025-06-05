@@ -1,0 +1,19 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# db/migrate/001_create_repositories.rb
+
+class CreateRepositories < ActiveRecord::Migration[7.0]
+  def change
+    create_table :repositories do |t|
+      t.string :name, null: false
+      t.string :url, null: false
+      t.boolean :private, default: false
+      t.boolean :archived, default: false
+      t.integer :github_id, null: false
+      t.timestamps
+    end
+
+    add_index :repositories, :github_id, unique: true
+  end
+end
