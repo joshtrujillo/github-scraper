@@ -13,5 +13,5 @@ require 'dotenv/load'
 ActiveRecord::Base.establish_connection(
   adapter: 'sqlite3',
   database: 'db/github_scraper.db',
-  pool: 25  # Increase connection pool size for multithreading
+  pool: 25 # Increase connection pool size for multithreading
 )

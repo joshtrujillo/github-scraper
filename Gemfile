@@ -10,3 +10,4 @@ gem 'octokit', '~> 6.0'        # GitHub API client
 gem 'parallel', '~> 1.22'      # For parallelizing work
 gem 'sqlite3', '~> 1.6'        # SQLite database adapter
 gem 'json', '~> 2.6'           # JSON library
+gem 'terminal-table', '~> 3.0' # For formatted table output

@@ -28,6 +28,7 @@
             dotenv
             faraday
             json
+            terminal-table
           ]
         );
       in

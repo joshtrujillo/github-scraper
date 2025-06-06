@@ -46,7 +46,6 @@ class GitHubClient
     # Only create mutex if threading is enabled
     @mutex = @use_threads ? Mutex.new : nil
 
-    # Log whether threading is enabled
     @logger.info "GitHub client initialized with #{@use_threads ? 'thread-safety enabled' : 'thread-safety disabled'}"
 
     if @access_token.nil? || @access_token.empty?
@@ -77,10 +76,8 @@ class GitHubClient
     with_error_handling do
       @logger.info "Fetching repositories for #{org_name}#{since ? " since #{since}" : ''}..."
       result = @client.organization_repositories(org_name, type: 'public')
-
       # Filter by updated time if specified
       result = result.select { |repo| repo.updated_at >= since } if since
-
       cache_result(cache_key, result)
       result
     end
@@ -175,7 +172,6 @@ class GitHubClient
   def check_cache(key)
     result = nil
     thread_id = Thread.current.object_id.to_s(16)
-
     # Use mutex only if threading is enabled
     if @use_threads && @mutex
       @mutex.synchronize do
@@ -197,7 +193,6 @@ class GitHubClient
     return nil unless @cache.key?(key)
 
     cache_entry = @cache[key]
-
     if Time.now - cache_entry[:timestamp] < @cache_ttl
       @logger.debug "Thread-#{thread_id}: Cache hit for #{key}" if @logger.debug?
       cache_entry[:data]
@@ -368,12 +363,12 @@ class GitHubClient
     if @use_threads && @mutex
       @mutex.synchronize do
         rate_limit = @client.rate_limit
-        handle_exceeded_rate_limit(rate_limit, thread_id)
+        handle_rate_limit_exceeded_helper(rate_limit, thread_id)
       end
     else
       # Direct access when threading is disabled
       rate_limit = @client.rate_limit
-      handle_exceeded_rate_limit(rate_limit, thread_id)
+      handle_rate_limit_exceeded_helper(rate_limit, thread_id)
     end
   end
 
@@ -381,7 +376,7 @@ class GitHubClient
   # @param rate_limit [Sawyer::Resource] Rate limit information from GitHub API
   # @param thread_id [String] Current thread ID for logging
   # @return [void]
-  def handle_exceeded_rate_limit(rate_limit, thread_id)
+  def handle_rate_limit_exceeded_helper(rate_limit, thread_id)
     reset_time = Time.at(rate_limit.resets_at)
     wait_time = reset_time - Time.now
 

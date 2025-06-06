@@ -258,7 +258,6 @@ class GitHubScraper
         state: github_review.state,
         submitted_at: github_review.submitted_at
       )
-
       # Log with thread info in verbose mode for better visibility of parallel operations
       thread_id = Thread.current.object_id.to_s(16)
       if @verbose
@@ -325,15 +324,27 @@ if __FILE__ == $PROGRAM_NAME
   parser = OptionParser.new do |opts|
     opts.banner = 'Usage: ruby scraper.rb [options]'
 
-    opts.on('-f', '--full', 'Perform a full sync instead of incremental') do
+    opts.on(
+      '-f',
+      '--full',
+      'Perform a full sync instead of incremental'
+    ) do
       options[:incremental] = false
     end
 
-    opts.on('-v', '--verbose', 'Enable verbose logging with thread information') do
+    opts.on(
+      '-v',
+      '--verbose',
+      'Enable verbose logging with thread information'
+    ) do
       options[:verbose] = true
     end
 
-    opts.on('-t', '--thread', 'Enables multithreading') do
+    opts.on(
+      '-t',
+      '--thread',
+      'Enables multithreading'
+    ) do
       options[:thread] = true
     end
 
@@ -345,6 +356,9 @@ if __FILE__ == $PROGRAM_NAME
 
   parser.parse!
 
-  scraper = GitHubScraper.new(verbose: options[:verbose], thread: options[:thread])
+  scraper = GitHubScraper.new(
+    verbose: options[:verbose],
+    thread: options[:thread]
+  )
   scraper.run(incremental: options[:incremental])
 end
