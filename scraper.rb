@@ -21,13 +21,12 @@ class GitHubScraper
   attr_reader :client, :logger
 
   ORGANIZATION = 'vercel'
-  THREADS = 5 # Number of threads to use for parallel operations
+  THREADS = 5 # Number of threads to use
 
   # Creates GitHub client and logger instance variables.
   # Runs Database migrations
   # @return [void]
   def initialize(verbose: false, thread: false)
-    # Enable multithreading (false by default)
     @thread = thread
     @verbose = verbose
 
@@ -88,7 +87,7 @@ class GitHubScraper
   #
   # @param incremental [Boolean] Whether to perform an incremental sync
   # @return [Array<Repository>] list of repositories
-  def fetch_repositories(incremental = true)
+  def fetch_repositories(incremental: true)
     @logger.info "Fetching repositories for #{ORGANIZATION}..."
 
     # Get the oldest last_synced_at time from repositories
