@@ -60,7 +60,7 @@ class GitHubScraper
       :green
     )
     # Fetch and store repositories
-    repositories = fetch_repositories(incremental)
+    repositories = fetch_repositories(incremental: incremental)
     # For each repository, fetch and store pull requests in parallel
     if @thread
       Parallel.each(repositories, in_threads: THREADS) do |repo|
