@@ -95,6 +95,8 @@ class GitHubScraper
 
     @logger.info "Using incremental sync (last synced: #{last_sync_time})" if incremental && last_sync_time
 
+    # Save time now to fix race condition.
+    last_synced_at = Time.now
     # Fetch repositories, filtered by update time if available
     github_repos = @client.fetch_organization_repos(ORGANIZATION, last_sync_time)
     @logger.info "Found #{github_repos.size} repositories for #{ORGANIZATION}."
@@ -115,7 +117,7 @@ class GitHubScraper
         url: github_repo.html_url,
         private: github_repo.private,
         archived: github_repo.archived,
-        last_synced_at: Time.now
+        last_synced_at: last_synced_at
       )
       @logger.info "Saved repository: #{repo.name}"
       repo
